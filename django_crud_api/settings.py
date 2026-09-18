@@ -26,7 +26,9 @@ SECRET_KEY = 'django-insecure-r%gkimx-ua1fzfo)(3rz80(v7(goxwfz6uw$e#8q1_*ux#slk9
 DEBUG = True
 
 ALLOWED_HOSTS = [
-    "backend-3-ao3l.onrender.com",
+    "localhost",
+    "127.0.0.1",
+    ".onrender.com",
 ]
 
 
@@ -134,5 +136,6 @@ MAILERS = {
 
 
 CORS_ALLOWED_ORIGINS = [
-    
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
