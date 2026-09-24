@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'rest_framework',
+    'drf_spectacular',
     'tasks'
 ]
 
@@ -114,7 +115,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es'
 
 TIME_ZONE = 'UTC'
 
@@ -144,3 +145,30 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://frontend-vert-one-pt320cfqws.vercel.app",
 ]
+
+
+REST_FRAMEWORK = {
+    # Sprint 1 sin login: se usa el usuario demo (ver DEMO_USER_ID)
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'EXCEPTION_HANDLER': 'tasks.exceptions.manejar_errores',
+    'COERCE_DECIMAL_TO_STRING': False,
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',  # Swagger en /docs  # horas como número (2.5) y no como texto ("2.50")
+}
+
+# Usuario al que se asocian los eventos mientras no haya login (US-06)
+DEMO_USER_ID = 'camilo123'
+
+# Documentación Swagger (/docs)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'API Organizador de Eventos Independientes',
+    'VERSION': '1.0.0',
+    'DESCRIPTION': (
+        'Backend del MiniProyecto 1 - Universidad del Valle.\n\n'
+        '**Usuario:** en el Sprint 1 no hay login; todo se asocia al usuario demo.\n\n'
+        '**Formato de errores:**\n'
+        '- 400: `{"error": "Revisa los campos marcados.", "fields": {"campo": "mensaje"}}`\n'
+        '- 404: `{"error": "No encontramos lo que buscas."}`\n'
+        '- 500: `{"error": "Ocurrió un error en el servidor. Intenta de nuevo."}`\n\n'
+        '**Fechas:** formato AAAA-MM-DD.'
+    ),
+}
