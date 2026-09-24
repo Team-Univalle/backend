@@ -114,7 +114,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es'
 
 TIME_ZONE = 'UTC'
 
@@ -144,3 +144,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://frontend-vert-one-pt320cfqws.vercel.app",
 ]
+
+
+REST_FRAMEWORK = {
+    # Sprint 1 sin login: se usa el usuario demo (ver DEMO_USER_ID)
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'EXCEPTION_HANDLER': 'tasks.exceptions.manejar_errores',
+}
+
+# Usuario al que se asocian los eventos mientras no haya login (US-06)
+DEMO_USER_ID = 'camilo123'
