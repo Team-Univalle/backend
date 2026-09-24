@@ -150,6 +150,7 @@ REST_FRAMEWORK = {
     # Sprint 1 sin login: se usa el usuario demo (ver DEMO_USER_ID)
     'DEFAULT_AUTHENTICATION_CLASSES': [],
     'EXCEPTION_HANDLER': 'tasks.exceptions.manejar_errores',
+    'COERCE_DECIMAL_TO_STRING': False,  # horas como número (2.5) y no como texto ("2.50")
 }
 
 # Usuario al que se asocian los eventos mientras no haya login (US-06)

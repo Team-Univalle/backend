@@ -1,8 +1,9 @@
 from django.conf import settings
+from django.shortcuts import get_object_or_404
 from rest_framework import generics
 
-from .models import Event
-from .serializers import EventSerializer
+from .models import Event, Subtask
+from .serializers import EventSerializer, SubtaskSerializer
 
 
 def usuario_actual_id(request):
@@ -29,3 +30,23 @@ class EventDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return Event.objects.filter(user_id=usuario_actual_id(self.request))
+
+
+class SubtaskListCreateView(generics.ListCreateAPIView):
+    """GET /events/<id>/subtasks -> subtareas del evento. POST -> crea una subtarea en ese evento."""
+
+    serializer_class = SubtaskSerializer
+
+    def get_event(self):
+        # 404 si el evento no existe o no es del usuario
+        return get_object_or_404(Event, pk=self.kwargs['event_id'], user_id=usuario_actual_id(self.request))
+
+    def get_queryset(self):
+        return Subtask.objects.filter(event=self.get_event()).order_by('target_date')
+
+    def create(self, request, *args, **kwargs):
+        self.event = self.get_event()  # primero buscar el evento, después validar los datos
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        serializer.save(event=self.event)
