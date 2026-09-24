@@ -37,7 +37,7 @@ class SubtaskSerializer(serializers.ModelSerializer):
             'id', 'event_id', 'name', 'target_date', 'estimated_hours',
             'status', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'event_id', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'event_id', 'created_at', 'updated_at']
         extra_kwargs = {
             'name': {'error_messages': {
                 'required': 'El título de la subtarea es obligatorio.',
@@ -55,6 +55,9 @@ class SubtaskSerializer(serializers.ModelSerializer):
                 'invalid': 'Las horas estimadas deben ser un número.',
                 'max_digits': 'Las horas estimadas son demasiado grandes.',
                 'max_decimal_places': 'Usa máximo 2 decimales en las horas estimadas.',
+            }},
+            'status': {'error_messages': {
+                'invalid_choice': 'El estado debe ser Pendiente, Ejecutada o Pospuesta.',
             }},
         }
 

@@ -23,10 +23,11 @@ class EventListCreateView(generics.ListCreateAPIView):
         serializer.save(user_id=usuario_actual_id(self.request))
 
 
-class EventDetailView(generics.RetrieveAPIView):
-    """GET /events/<id> -> detalle de un evento del usuario."""
+class EventDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET, PATCH y DELETE /events/<id>. Al eliminar un evento se eliminan sus subtareas (cascada)."""
 
     serializer_class = EventSerializer
+    http_method_names = ['get', 'patch', 'delete']
 
     def get_queryset(self):
         return Event.objects.filter(user_id=usuario_actual_id(self.request))
@@ -49,4 +50,14 @@ class SubtaskListCreateView(generics.ListCreateAPIView):
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save(event=self.event)
+        serializer.save(event=self.event, status='Pendiente')  # toda subtarea nueva empieza Pendiente
+
+
+class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET, PATCH y DELETE /subtasks/<id> (solo subtareas de eventos del usuario)."""
+
+    serializer_class = SubtaskSerializer
+    http_method_names = ['get', 'patch', 'delete']
+
+    def get_queryset(self):
+        return Subtask.objects.filter(event__user_id=usuario_actual_id(self.request))
