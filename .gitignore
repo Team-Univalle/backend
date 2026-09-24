@@ -8,10 +8,11 @@ __pycache__/
 venv/
 env/
 
-# Local configuration and secrets
+# Local configuration, secrets and database
 .env
 .env.*
 !.env.example
+db.sqlite3
 
 # Test and tooling caches
 .pytest_cache/
