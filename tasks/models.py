@@ -44,3 +44,25 @@ class Event(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Subtask(models.Model):
+    """Subtarea logística de un evento (tabla subtasks de Supabase)."""
+
+    ESTADOS = [('Pendiente', 'Pendiente'), ('Ejecutada', 'Ejecutada'), ('Pospuesta', 'Pospuesta')]
+
+    id = models.CharField(primary_key=True, max_length=50, default=generar_id)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, db_column='event_id', related_name='subtasks')
+    name = models.CharField(max_length=200)
+    target_date = models.DateField()
+    estimated_hours = models.DecimalField(max_digits=5, decimal_places=2)
+    status = models.CharField(max_length=20, choices=ESTADOS, default='Pendiente')
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True)
+
+    class Meta:
+        managed = False  # la tabla ya existe en Supabase, Django no la modifica
+        db_table = 'subtasks'
+
+    def __str__(self):
+        return self.name
