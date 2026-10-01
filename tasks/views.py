@@ -70,7 +70,7 @@ class TodayListNoExecute(APIView):
 
     def get(self, request):
         # 404 si el evento no existe o no es del usuario
-        today=timezone.now().date()
+        today=timezone.now().localdate()
 
         subtask=(
             Subtask.objects
