@@ -4,8 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from django.conf import settings
+from django.http import Http404
 from django.test import SimpleTestCase
 
+from .models import Event
 from .serializers import SubtaskSerializer
 
 class EstimatedHoursTest(SimpleTestCase):
@@ -106,6 +108,9 @@ class TodayEndpointTest(SimpleTestCase):
         queryset.order_by.return_value = queryset
 
         def filter_by_date(**filters):
+            if 'event_id' in filters or 'status' in filters:
+                return queryset
+
             if 'target_date__lt' in filters:
                 return [self.overdue]
 
@@ -120,7 +125,7 @@ class TodayEndpointTest(SimpleTestCase):
         queryset.filter.side_effect = filter_by_date
         return queryset
 
-    def request_today(self, queryset):
+    def request_today(self, queryset, query='', event_error=None):
         with (
             patch(
                 'tasks.views.Subtask.objects.filter',
@@ -130,15 +135,19 @@ class TodayEndpointTest(SimpleTestCase):
                 'tasks.views.timezone.localdate',
                 return_value=self.today,
             ),
+            patch('tasks.views.get_object_or_404') as event_lookup,
         ):
-            response = self.client.get('/hoy')
+            if event_error is not None:
+                event_lookup.side_effect = event_error
 
-        return response, initial_filter
+            response = self.client.get(f'/today{query}')
+
+        return response, initial_filter, event_lookup
 
     def test_returns_subtasks_classified_by_date(self):
         queryset = self.prepare_queryset()
 
-        response, _ = self.request_today(queryset)
+        response, _, _ = self.request_today(queryset)
 
         self.assertEqual(response.status_code, 200)
 
@@ -165,7 +174,7 @@ class TodayEndpointTest(SimpleTestCase):
     def test_includes_event_name(self):
         queryset = self.prepare_queryset()
 
-        response, _ = self.request_today(queryset)
+        response, _, _ = self.request_today(queryset)
         data = response.json()
 
         all_subtasks = (
@@ -183,7 +192,7 @@ class TodayEndpointTest(SimpleTestCase):
     def test_filters_user_status_and_order(self):
         queryset = self.prepare_queryset()
 
-        _, initial_filter = self.request_today(queryset)
+        _, initial_filter, _ = self.request_today(queryset)
 
         initial_filter.assert_called_once_with(
             event__user_id=settings.DEMO_USER_ID,
@@ -205,3 +214,105 @@ class TodayEndpointTest(SimpleTestCase):
             call(target_date=self.today),
             call(target_date__gt=self.today),
         ])
+
+    def test_filters_by_event(self):
+        queryset = self.prepare_queryset()
+
+        response, _, event_lookup = self.request_today(
+            queryset,
+            query='?event_id=event-1',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event_lookup.assert_called_once_with(
+            Event,
+            pk='event-1',
+            user_id=settings.DEMO_USER_ID,
+        )
+        queryset.filter.assert_any_call(event_id='event-1')
+
+    def test_filters_by_status(self):
+        queryset = self.prepare_queryset()
+
+        response, _, event_lookup = self.request_today(
+            queryset,
+            query='?status=Pospuesta',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event_lookup.assert_not_called()
+        queryset.filter.assert_any_call(status='Pospuesta')
+
+    def test_combines_event_and_status_filters(self):
+        queryset = self.prepare_queryset()
+
+        response, _, event_lookup = self.request_today(
+            queryset,
+            query='?event_id=event-1&status=Pendiente',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event_lookup.assert_called_once_with(
+            Event,
+            pk='event-1',
+            user_id=settings.DEMO_USER_ID,
+        )
+        queryset.filter.assert_any_call(event_id='event-1')
+        queryset.filter.assert_any_call(status='Pendiente')
+
+    def test_rejects_event_from_another_user(self):
+        queryset = self.prepare_queryset()
+
+        response, initial_filter, event_lookup = self.request_today(
+            queryset,
+            query='?event_id=foreign-event',
+            event_error=Http404,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {'error': 'No encontramos lo que buscas.'},
+        )
+        event_lookup.assert_called_once_with(
+            Event,
+            pk='foreign-event',
+            user_id=settings.DEMO_USER_ID,
+        )
+        initial_filter.assert_not_called()
+
+    def test_rejects_invalid_status_with_global_error_format(self):
+        queryset = self.prepare_queryset()
+
+        response, initial_filter, event_lookup = self.request_today(
+            queryset,
+            query='?status=Ejecutada',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {
+            'error': 'Revisa los campos marcados.',
+            'fields': {
+                'status': 'El estado debe ser Pendiente o Pospuesta.',
+            },
+        })
+        event_lookup.assert_not_called()
+        initial_filter.assert_not_called()
+
+    def test_preserves_date_and_estimated_hours_order(self):
+        queryset = self.prepare_queryset()
+
+        response, _, _ = self.request_today(
+            queryset,
+            query='?event_id=event-1&status=Pendiente',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        queryset.order_by.assert_called_once_with(
+            'target_date',
+            'estimated_hours',
+        )
+        self.assertEqual(
+            [item['name'] for item in response.json()['hoy']],
+            ['Subtarea corta de hoy', 'Subtarea larga de hoy'],
+        )
