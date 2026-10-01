@@ -1,9 +1,12 @@
 from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import Event, Subtask
-from .serializers import EventSerializer, SubtaskSerializer
+from .serializers import EventSerializer, SubtaskSerializer, TodaySerializer
 
 
 def usuario_actual_id(request):
@@ -61,3 +64,28 @@ class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Subtask.objects.filter(event__user_id=usuario_actual_id(self.request))
+
+class TodayListNoExecute(APIView):
+    """GET/HOY ->TAREAS NO EJECUTADAS EN EL DIA"""
+
+    def get(self, request):
+        # 404 si el evento no existe o no es del usuario
+        today=timezone.now().date()
+
+        subtask=(
+            Subtask.objects
+            .filter(event__user_id=usuario_actual_id(request))
+            .exclude(status='Ejecutada')
+            .select_related('event')
+            .order_by('target_date', 'estimated_hours')
+        )
+
+        overdue=subtask.filter(target_date__lt=today)
+        today_subtask=subtask.filter(target_date=today)
+        upcoming=subtask.filter(target_date__gt=today)
+
+        return Response({
+                'vencidas': TodaySerializer(overdue, many=True).data,
+                'hoy': TodaySerializer(today_subtask, many=True).data,
+                'proximas': TodaySerializer(upcoming, many=True).data,
+            })

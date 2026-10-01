@@ -65,3 +65,12 @@ class SubtaskSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError('Las horas estimadas deben ser mayores que 0.')
         return value
+
+class TodaySerializer(serializers.ModelSerializer):
+    event_name=serializers.CharField(source='event.name', read_only=True)
+    class Meta:
+        model=Subtask
+        fields=[
+            'id', 'event_id', 'event_name', 'name', 'target_date', 'estimated_hours',
+            'status', 'created_at', 'updated_at',
+        ]
