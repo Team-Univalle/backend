@@ -2,11 +2,18 @@ import logging
 
 from django.http import Http404
 from rest_framework import status
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, NotFound, ValidationError
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
 logger = logging.getLogger(__name__)
+
+
+class InvalidCredentials(APIException):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    default_detail = 'Credenciales inválidas'
+    default_code = 'invalid_credentials'
 
 
 def manejar_errores(exc, context):
@@ -30,6 +37,14 @@ def manejar_errores(exc, context):
 
     if isinstance(exc, (NotFound, Http404)):
         response.data = {'error': 'No encontramos lo que buscas.'}
+        return response
+
+    if isinstance(exc, InvalidCredentials):
+        response.data = {'error': 'Credenciales inválidas'}
+        return response
+
+    if isinstance(exc, (AuthenticationFailed, NotAuthenticated)):
+        response.data = {'error': 'Tu sesión expiró o no has iniciado sesión.'}
         return response
 
     # Otros errores de DRF (405...)
