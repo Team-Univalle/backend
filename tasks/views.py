@@ -1,4 +1,4 @@
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
@@ -10,13 +10,14 @@ from rest_framework.views import APIView
 
 from .authentication import create_access_token
 from .exceptions import InvalidCredentials
-from .models import Event, Profile, Subtask
+from .models import Event, Profile, Subtask, generar_id
 from .serializers import (
     EventSerializer,
     GlobalErrorSerializer,
     LoginResponseSerializer,
     LoginSerializer,
     ProfileSerializer,
+    RegisterSerializer,
     SubtaskSerializer,
     TodayResponseSerializer,
     TodaySerializer,
@@ -55,6 +56,37 @@ class LoginView(APIView):
         })
 
 
+class RegisterView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=RegisterSerializer,
+        responses={201: LoginResponseSerializer, 400: GlobalErrorSerializer},
+        auth=[],
+        summary='Registrar nuevo usuario',
+    )
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        name = serializer.validated_data['name'].strip()
+        email = serializer.validated_data['email']
+        password = serializer.validated_data['password']
+
+        profile = Profile.objects.create(
+            id=generar_id(),
+            name=name,
+            email=email,
+            password_hash=make_password(password),
+        )
+
+        return Response({
+            'token': create_access_token(profile.id),
+            'user': ProfileSerializer(profile).data,
+        }, status=201)
+
+
 class MeView(APIView):
     @extend_schema(responses={200: ProfileSerializer, 401: GlobalErrorSerializer}, summary='Usuario actual')
     def get(self, request):
@@ -89,18 +121,17 @@ class SubtaskListCreateView(generics.ListCreateAPIView):
     serializer_class = SubtaskSerializer
 
     def get_event(self):
-        # 404 si el evento no existe o no es del usuario
         return get_object_or_404(Event, pk=self.kwargs['event_id'], user_id=usuario_actual_id(self.request))
 
     def get_queryset(self):
         return Subtask.objects.filter(event=self.get_event()).order_by('target_date')
 
     def create(self, request, *args, **kwargs):
-        self.event = self.get_event()  # primero buscar el evento, después validar los datos
+        self.event = self.get_event()
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save(event=self.event, status='Pendiente')  # toda subtarea nueva empieza Pendiente
+        serializer.save(event=self.event, status='Pendiente')
 
 
 class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -111,6 +142,7 @@ class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Subtask.objects.filter(event__user_id=usuario_actual_id(self.request))
+
 
 class TodayListNoExecute(APIView):
     """GET /today -> subtareas no ejecutadas, agrupadas por fecha."""
@@ -178,12 +210,12 @@ class TodayListNoExecute(APIView):
             .order_by('target_date', 'estimated_hours')
         )
 
-        overdue = subtasks.filter(target_date__lt=today)
-        today_subtasks = subtasks.filter(target_date=today)
-        upcoming = subtasks.filter(target_date__gt=today)
+        resueltas_vencidas = subtasks.filter(target_date__lt=today)
+        resueltas_hoy = subtasks.filter(target_date=today)
+        resueltas_proximas = subtasks.filter(target_date__gt=today)
 
         return Response({
-            'vencidas': TodaySerializer(overdue, many=True).data,
-            'hoy': TodaySerializer(today_subtasks, many=True).data,
-            'proximas': TodaySerializer(upcoming, many=True).data,
+            'vencidas': TodaySerializer(resueltas_vencidas, many=True).data,
+            'hoy': TodaySerializer(resueltas_hoy, many=True).data,
+            'proximas': TodaySerializer(resueltas_proximas, many=True).data,
         })

@@ -1,3 +1,5 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from rest_framework import serializers
 
 from .models import Event, Profile, Subtask
@@ -25,6 +27,46 @@ class LoginSerializer(serializers.Serializer):
             'blank': 'La contraseña es obligatoria.',
         },
     )
+
+
+class RegisterSerializer(serializers.Serializer):
+    name = serializers.CharField(
+        required=True,
+        error_messages={
+            'required': 'El nombre es obligatorio.',
+            'blank': 'El nombre es obligatorio.',
+        },
+    )
+    email = serializers.EmailField(
+        required=True,
+        error_messages={
+            'required': 'El correo es obligatorio.',
+            'blank': 'El correo es obligatorio.',
+            'invalid': 'El correo no tiene un formato válido.',
+        },
+    )
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        trim_whitespace=False,
+        error_messages={
+            'required': 'La contraseña es obligatoria.',
+            'blank': 'La contraseña es obligatoria.',
+        },
+    )
+
+    def validate_email(self, value):
+        email = value.strip().lower()
+        if Profile.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError('Ya existe un usuario con ese correo.')
+        return email
+
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except ValidationError as exc:
+            raise serializers.ValidationError(' '.join(exc.messages))
+        return value
 
 
 class LoginResponseSerializer(serializers.Serializer):
@@ -94,6 +136,7 @@ class SubtaskSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError('Las horas estimadas deben ser mayores que 0.')
         return value
+
 
 class TodaySerializer(serializers.ModelSerializer):
     event_name = serializers.CharField(source='event.name', read_only=True)

@@ -9,6 +9,7 @@ from tasks.views import (
     EventListCreateView,
     LoginView,
     MeView,
+    RegisterView,
     SubtaskDetailView,
     SubtaskListCreateView,
     TodayListNoExecute,
@@ -36,6 +37,7 @@ urlpatterns = [
     path('health', health_check),
     path('admin/', admin.site.urls),
     path('login', LoginView.as_view()),
+    path('register', RegisterView.as_view(), name='register'),
     path('me', MeView.as_view()),
     path('today', TodayListNoExecute.as_view()),
     
