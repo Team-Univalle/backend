@@ -12,8 +12,13 @@ class Profile(models.Model):
 
     id = models.CharField(primary_key=True, max_length=50)
     name = models.CharField(max_length=150)
-    email = models.CharField(max_length=150)
+    email = models.EmailField(max_length=150, unique=True)
+    password_hash = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
+
+    @property
+    def is_authenticated(self):
+        return True
 
     class Meta:
         managed = False  # la tabla ya existe en Supabase, Django no la modifica

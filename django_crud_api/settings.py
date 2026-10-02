@@ -10,9 +10,11 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 import dj_database_url
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -146,17 +148,29 @@ CORS_ALLOWED_ORIGINS = [
     "https://frontend-vert-one-pt320cfqws.vercel.app",
 ]
 
+if frontend_url := os.getenv('FRONTEND_URL'):
+    if frontend_url not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(frontend_url)
+
+# django-cors-headers ya incluye Authorization; se declara para dejar explícito
+# el contrato que necesita el frontend desplegado en Vercel.
+CORS_ALLOW_HEADERS = list(default_headers)
+
+JWT_SECRET = os.getenv('JWT_SECRET', '')
+JWT_EXPIRATION_HOURS = 8
+
 
 REST_FRAMEWORK = {
-    # Sprint 1 sin login: se usa el usuario demo (ver DEMO_USER_ID)
-    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'tasks.authentication.JWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
     'EXCEPTION_HANDLER': 'tasks.exceptions.manejar_errores',
     'COERCE_DECIMAL_TO_STRING': False,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',  # Swagger en /docs  # horas como número (2.5) y no como texto ("2.50")
 }
-
-# Usuario al que se asocian los eventos mientras no haya login (US-06)
-DEMO_USER_ID = 'camilo123'
 
 # Documentación Swagger (/docs)
 SPECTACULAR_SETTINGS = {
@@ -164,9 +178,10 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
     'DESCRIPTION': (
         'Backend del MiniProyecto 1 - Universidad del Valle.\n\n'
-        '**Usuario:** en el Sprint 1 no hay login; todo se asocia al usuario demo.\n\n'
+        '**Autenticación:** usa `Authorization: Bearer <token>`. El token se obtiene en `POST /login`.\n\n'
         '**Formato de errores:**\n'
         '- 400: `{"error": "Revisa los campos marcados.", "fields": {"campo": "mensaje"}}`\n'
+        '- 401: `{"error": "Tu sesión expiró o no has iniciado sesión."}`\n'
         '- 404: `{"error": "No encontramos lo que buscas."}`\n'
         '- 500: `{"error": "Ocurrió un error en el servidor. Intenta de nuevo."}`\n\n'
         '**Fechas:** formato AAAA-MM-DD.'

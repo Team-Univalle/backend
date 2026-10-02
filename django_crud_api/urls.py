@@ -4,7 +4,15 @@ from django.http import JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from tasks.views import EventDetailView, EventListCreateView, SubtaskDetailView, SubtaskListCreateView, TodayListNoExecute
+from tasks.views import (
+    EventDetailView,
+    EventListCreateView,
+    LoginView,
+    MeView,
+    SubtaskDetailView,
+    SubtaskListCreateView,
+    TodayListNoExecute,
+)
 
 
 def health_check(request):
@@ -27,6 +35,8 @@ urlpatterns = [
     path('', health_check),
     path('health', health_check),
     path('admin/', admin.site.urls),
+    path('login', LoginView.as_view()),
+    path('me', MeView.as_view()),
     path('today', TodayListNoExecute.as_view()),
     
     path('events', EventListCreateView.as_view()),

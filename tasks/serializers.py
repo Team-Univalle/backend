@@ -1,6 +1,35 @@
 from rest_framework import serializers
 
-from .models import Event, Subtask
+from .models import Event, Profile, Subtask
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Profile
+        fields = ['id', 'name', 'email']
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField(
+        error_messages={
+            'required': 'El correo es obligatorio.',
+            'blank': 'El correo es obligatorio.',
+            'invalid': 'El correo no tiene un formato válido.',
+        },
+    )
+    password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        error_messages={
+            'required': 'La contraseña es obligatoria.',
+            'blank': 'La contraseña es obligatoria.',
+        },
+    )
+
+
+class LoginResponseSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    user = ProfileSerializer()
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -67,10 +96,30 @@ class SubtaskSerializer(serializers.ModelSerializer):
         return value
 
 class TodaySerializer(serializers.ModelSerializer):
-    event_name=serializers.CharField(source='event.name', read_only=True)
+    event_name = serializers.CharField(source='event.name', read_only=True)
+
     class Meta:
-        model=Subtask
-        fields=[
+        model = Subtask
+        fields = [
             'id', 'event_id', 'event_name', 'name', 'target_date', 'estimated_hours',
             'status', 'created_at', 'updated_at',
         ]
+
+
+class TodayResponseSerializer(serializers.Serializer):
+    vencidas = TodaySerializer(many=True)
+    hoy = TodaySerializer(many=True)
+    proximas = TodaySerializer(many=True)
+
+
+class TodayErrorFieldsSerializer(serializers.Serializer):
+    status = serializers.CharField()
+
+
+class TodayValidationErrorSerializer(serializers.Serializer):
+    error = serializers.CharField()
+    fields = TodayErrorFieldsSerializer()
+
+
+class GlobalErrorSerializer(serializers.Serializer):
+    error = serializers.CharField()
