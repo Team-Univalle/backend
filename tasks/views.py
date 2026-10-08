@@ -1,6 +1,7 @@
 from django.contrib.auth.hashers import check_password, make_password
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db.models import Sum
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import generics
 from rest_framework.exceptions import ValidationError
@@ -22,6 +23,7 @@ from .serializers import (
     TodayResponseSerializer,
     TodaySerializer,
     TodayValidationErrorSerializer,
+    DailyLimitSerializer,
 )
 
 
@@ -129,6 +131,17 @@ class SubtaskListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         self.event = self.get_event()
         return super().create(request, *args, **kwargs)
+    
+    def get_serializer_context(self):
+
+        context = super().get_serializer_context()
+
+        try:
+            context['event'] = self.get_event()
+        except Exception:
+            pass
+
+        return context
 
     def perform_create(self, serializer):
         serializer.save(event=self.event, status='Pendiente')
@@ -219,3 +232,107 @@ class TodayListNoExecute(APIView):
             'hoy': TodaySerializer(resueltas_hoy, many=True).data,
             'proximas': TodaySerializer(resueltas_proximas, many=True).data,
         })
+
+class DailyLimitView(APIView):
+
+    @extend_schema(
+        summary='Consultar límite diario',
+        responses={200: DailyLimitSerializer}
+    )
+    def get(self, request):
+
+        return Response({
+            'daily_limit_hours': request.user.daily_limit_hours
+        })
+
+    @extend_schema(
+        summary='Actualizar límite diario',
+        request=DailyLimitSerializer,
+        responses={200: DailyLimitSerializer}
+    )
+    def patch(self, request):
+
+        serializer = DailyLimitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        request.user.daily_limit_hours = serializer.validated_data[
+            'daily_limit_hours'
+        ]
+
+        request.user.save()
+
+        return Response({
+            'daily_limit_hours': request.user.daily_limit_hours
+        })
+
+def calcular_carga_diaria(user, fecha):
+
+    total = (
+        Subtask.objects
+        .filter(
+            event__user=user,
+            target_date=fecha
+        )
+        .aggregate(
+            total=Sum('estimated_hours')
+        )
+    )
+
+    return float(total["total"] or 0)
+
+class ConflictCheckView(APIView):
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description='Fecha a analizar.'
+            )
+        ]
+    )
+    
+    def get(self, request):
+
+        fecha = request.query_params.get("date")
+
+        if not fecha:
+            raise ValidationError({
+                "date": "Debe indicar una fecha."
+            })
+
+        total = calcular_carga_diaria(
+            request.user,
+            fecha
+        )
+
+        limite = request.user.daily_limit_hours
+
+        conflict = total > limite
+
+        response = {
+            "conflict": conflict,
+            "planned_hours": total,
+            "daily_limit": limite
+        }
+
+        if conflict:
+
+            exceso = total - limite
+
+            response["message"] = (
+                f"Quedarías con {total} horas "
+                f"planificadas. El límite diario es "
+                f"{limite} horas. Exceso: {exceso} horas."
+            )
+
+            response["options"] = [
+                "mover_a_otro_dia",
+                "reducir_horas"
+            ]
+
+        return Response(response)
+
+    

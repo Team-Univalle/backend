@@ -8,7 +8,12 @@ from .models import Event, Profile, Subtask
 class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
-        fields = ['id', 'name', 'email']
+        fields = [
+            'id',
+            'name',
+            'email',
+            'daily_limit_hours'
+        ]
 
 
 class LoginSerializer(serializers.Serializer):
@@ -134,8 +139,45 @@ class SubtaskSerializer(serializers.ModelSerializer):
 
     def validate_estimated_hours(self, value):
         if value <= 0:
-            raise serializers.ValidationError('Las horas estimadas deben ser mayores que 0.')
+            raise serializers.ValidationError(
+                'Las horas estimadas deben ser mayores que 0.'
+            )
         return value
+
+    def validate(self, attrs):
+
+        target_date = attrs.get('target_date')
+
+        # CREACIÓN DE SUBTAREA
+        if self.instance is None:
+
+            event = self.context.get('event')
+
+            if (
+                event
+                and target_date
+                and target_date > event.event_date
+            ):
+                raise serializers.ValidationError({
+                    'target_date':
+                    'La fecha de la gestión no puede ser posterior a la fecha del evento.'
+                })
+
+        # EDICIÓN DE SUBTAREA
+        else:
+
+            event = self.instance.event
+
+            if (
+                target_date
+                and target_date > event.event_date
+            ):
+                raise serializers.ValidationError({
+                    'target_date':
+                    'La fecha de la gestión no puede ser posterior a la fecha del evento.'
+                })
+
+        return attrs
 
 
 class TodaySerializer(serializers.ModelSerializer):
@@ -166,3 +208,19 @@ class TodayValidationErrorSerializer(serializers.Serializer):
 
 class GlobalErrorSerializer(serializers.Serializer):
     error = serializers.CharField()
+
+class DailyLimitSerializer(serializers.Serializer):
+    daily_limit_hours = serializers.IntegerField(
+        min_value=1,
+        max_value=16
+    )
+
+class ConflictResponseSerializer(serializers.Serializer):
+    conflict = serializers.BooleanField()
+    planned_hours = serializers.FloatField()
+    daily_limit = serializers.IntegerField()
+    message = serializers.CharField(required=False)
+    options = serializers.ListField(
+        child=serializers.CharField(),
+        required=False
+    )

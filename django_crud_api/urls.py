@@ -13,6 +13,8 @@ from tasks.views import (
     SubtaskDetailView,
     SubtaskListCreateView,
     TodayListNoExecute,
+    ConflictCheckView,
+    DailyLimitView,
 )
 
 
@@ -45,6 +47,10 @@ urlpatterns = [
     path('events/<str:pk>', EventDetailView.as_view()),
     path('events/<str:event_id>/subtasks', SubtaskListCreateView.as_view()),
     path('subtasks/<str:pk>', SubtaskDetailView.as_view()),
+
+    path('conflicts', ConflictCheckView.as_view()),
+    path('daily-limit', DailyLimitView.as_view()),
+
     path('schema', SpectacularAPIView.as_view(), name='schema'),
     path('docs', SpectacularSwaggerView.as_view(url_name='schema')),
 ]
