@@ -14,6 +14,7 @@ class Profile(models.Model):
     name = models.CharField(max_length=150)
     email = models.EmailField(max_length=150, unique=True)
     password_hash = models.CharField(max_length=128)
+    daily_limit_hours = models.IntegerField(default=6)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     @property
