@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 import dj_database_url
@@ -119,7 +120,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'es'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Bogota'
 
 USE_I18N = True
 
@@ -187,3 +188,8 @@ SPECTACULAR_SETTINGS = {
         '**Fechas:** formato AAAA-MM-DD.'
     ),
 }
+
+# Tests con persistencia real local, no sobre los datos del equipo en Supabase.
+if 'test' in sys.argv:
+    DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+    TEST_RUNNER = 'tasks.test_runner.LocalDatabaseRunner'

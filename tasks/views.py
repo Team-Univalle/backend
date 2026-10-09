@@ -2,6 +2,8 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Sum
+from django.db import transaction
+from datetime import timedelta
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import generics
 from rest_framework.exceptions import ValidationError
@@ -10,7 +12,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .authentication import create_access_token
-from .exceptions import InvalidCredentials
+from .exceptions import InvalidCredentials, OverloadConflict
+from .capacity import evaluate_capacity
 from .models import Event, Profile, Subtask, generar_id
 from .serializers import (
     EventSerializer,
@@ -24,6 +27,8 @@ from .serializers import (
     TodaySerializer,
     TodayValidationErrorSerializer,
     DailyLimitSerializer,
+    CapacityQuerySerializer,
+    ConflictResponseSerializer,
 )
 
 
@@ -144,7 +149,13 @@ class SubtaskListCreateView(generics.ListCreateAPIView):
         return context
 
     def perform_create(self, serializer):
-        serializer.save(event=self.event, status='Pendiente')
+        with transaction.atomic():
+            profile = Profile.objects.select_for_update().get(pk=self.request.user.id)
+            values = serializer.validated_data
+            capacity = evaluate_capacity(profile, values['target_date'], values['estimated_hours'])
+            if capacity['conflict']:
+                raise OverloadConflict(capacity)
+            serializer.save(event=self.event, status='Pendiente')
 
 
 class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -155,6 +166,30 @@ class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Subtask.objects.filter(event__user_id=usuario_actual_id(self.request))
+
+    def update(self, request, *args, **kwargs):
+        self.get_object()  # 404 antes de adquirir el mutex para recursos ajenos.
+        # El perfil actúa como mutex por organizador, incluso entre eventos distintos.
+        with transaction.atomic():
+            profile = Profile.objects.select_for_update().get(pk=request.user.id)
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            values = serializer.validated_data
+            changed = any(key in values and values[key] != getattr(instance, key)
+                          for key in ('target_date', 'estimated_hours', 'status'))
+            if changed:
+                capacity = evaluate_capacity(profile, values.get('target_date', instance.target_date),
+                    values.get('estimated_hours', instance.estimated_hours), instance.id,
+                    values.get('status', instance.status))
+                only_postponing = (values.get('status') == 'Pospuesta'
+                    and values.get('target_date', instance.target_date) == instance.target_date
+                    and values.get('estimated_hours', instance.estimated_hours) == instance.estimated_hours
+                    and instance.status != 'Ejecutada')
+                if capacity['conflict'] and not only_postponing:
+                    raise OverloadConflict(capacity)
+            serializer.save()
+            return Response(serializer.data)
 
 
 class TodayListNoExecute(APIView):
@@ -255,15 +290,19 @@ class DailyLimitView(APIView):
         serializer = DailyLimitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        request.user.daily_limit_hours = serializer.validated_data[
-            'daily_limit_hours'
-        ]
-
-        request.user.save()
+        with transaction.atomic():
+            profile = Profile.objects.select_for_update().get(pk=request.user.id)
+            profile.daily_limit_hours = serializer.validated_data['daily_limit_hours']
+            profile.save(update_fields=['daily_limit_hours'])
+            request.user.daily_limit_hours = profile.daily_limit_hours
 
         return Response({
             'daily_limit_hours': request.user.daily_limit_hours
         })
+
+    @extend_schema(request=DailyLimitSerializer, responses={200: DailyLimitSerializer, 400: GlobalErrorSerializer})
+    def put(self, request):
+        return self.patch(request)
 
 def calcular_carga_diaria(user, fecha):
 
@@ -273,6 +312,7 @@ def calcular_carga_diaria(user, fecha):
             event__user=user,
             target_date=fecha
         )
+        .exclude(status='Ejecutada')
         .aggregate(
             total=Sum('estimated_hours')
         )
@@ -290,49 +330,33 @@ class ConflictCheckView(APIView):
                 location=OpenApiParameter.QUERY,
                 required=True,
                 description='Fecha a analizar.'
-            )
-        ]
+            ),
+            OpenApiParameter(name='subtask_id', type=OpenApiTypes.STR, description='Gestión propia que se sustituye, sin contarla dos veces.'),
+            OpenApiParameter(name='estimated_hours', type=OpenApiTypes.NUMBER, description='Horas propuestas, > 0, hasta dos decimales.'),
+            OpenApiParameter(name='status', enum=['Pendiente', 'Pospuesta', 'Ejecutada']),
+        ],
+        responses={200: ConflictResponseSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer},
     )
     
     def get(self, request):
-
-        fecha = request.query_params.get("date")
-
-        if not fecha:
-            raise ValidationError({
-                "date": "Debe indicar una fecha."
-            })
-
-        total = calcular_carga_diaria(
-            request.user,
-            fecha
-        )
-
-        limite = request.user.daily_limit_hours
-
-        conflict = total > limite
-
-        response = {
-            "conflict": conflict,
-            "planned_hours": total,
-            "daily_limit": limite
-        }
-
-        if conflict:
-
-            exceso = total - limite
-
-            response["message"] = (
-                f"Quedarías con {total} horas "
-                f"planificadas. El límite diario es "
-                f"{limite} horas. Exceso: {exceso} horas."
-            )
-
-            response["options"] = [
-                "mover_a_otro_dia",
-                "reducir_horas"
-            ]
-
-        return Response(response)
-
-    
+        serializer = CapacityQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        item = None
+        if values.get('subtask_id'):
+            item = get_object_or_404(Subtask, pk=values['subtask_id'], event__user_id=request.user.id)
+        hours = values.get('estimated_hours', item.estimated_hours if item else 0)
+        status = values.get('status', item.status if item else 'Pendiente')
+        capacity = evaluate_capacity(request.user, values['date'], hours, item.id if item else None, status)
+        capacity['suggested_dates'] = []
+        if item and capacity['conflict']:
+            for offset in range(1, 15):
+                candidate = max(values['date'], timezone.localdate()) + timedelta(days=offset)
+                if candidate > item.event.event_date:
+                    break
+                result = evaluate_capacity(request.user, candidate, hours, item.id, status)
+                if not result['conflict']:
+                    capacity['suggested_dates'].append(result)
+                if len(capacity['suggested_dates']) == 3:
+                    break
+        return Response(capacity)

@@ -16,9 +16,22 @@ class InvalidCredentials(APIException):
     default_code = 'invalid_credentials'
 
 
+class OverloadConflict(APIException):
+    status_code = 409
+    default_code = 'overload_conflict'
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        super().__init__(capacity['message'])
+
+
 def manejar_errores(exc, context):
     """Todas las respuestas de error tienen la forma {"error": "...", "fields": {...}}."""
     response = exception_handler(exc, context)
+
+    if isinstance(exc, OverloadConflict):
+        return Response({'error': exc.capacity['message'], 'code': 'overload_conflict',
+                         'conflict': exc.capacity}, status=409)
 
     # Error inesperado (bug, base de datos caída...): 500 con mensaje entendible
     if response is None:

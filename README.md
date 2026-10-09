@@ -229,3 +229,23 @@ OK
 ```
 
 La suite cubre login, errores indistinguibles de credenciales, campos vacíos, JWT de ocho horas, `/me`, ausencia de token, token vencido, token alterado, comando de usuarios, filtros y orden de `/today`, y aislamiento de eventos y subtareas entre dos usuarios.
+
+## Sprint 3: capacidad persistente y resolución
+
+`GET /daily-limit` consulta el límite del usuario autenticado. `PUT /daily-limit` (también PATCH por compatibilidad) recibe `{"daily_limit_hours": 6}`: entero inclusivo 1–16; decimales, vacío y texto responden 400 con `fields`. El default de un perfil es 6. Un límite menor que la carga existente informa sobrecarga en /conflicts, pero no cambia fechas ni tareas.
+
+`GET /conflicts?date=2026-10-11&subtask_id=ID&estimated_hours=2` evalúa la propuesta. `status` es opcional. Sin subtarea evalúa la carga existente. Devuelve `date`, `conflict`, `planned_hours`, `task_hours`, `total_hours`, `daily_limit`, `excess`, `message`, `options` y `suggested_dates`. No cuentan ejecutadas ni otro organizador; la tarea editada se excluye antes de sumar su propuesta. Total igual al límite es válido. Horas admitidas: >0, hasta 999.99, máximo 2 decimales.
+
+`PATCH /subtasks/ID` y `POST /events/ID/subtasks` vuelven a evaluar capacidad al persistir. Un mutex transaccional por perfil evita aceptar dos cambios concurrentes que juntos sobrecarguen el día. Si excede: 409 con `{"error":"...","code":"overload_conflict","conflict":{...}}`, sin guardar cambios parciales. Recursos ajenos: 404; sin JWT válido: 401 global. Posponer explícitamente conserva fecha/horas y sigue contando como carga; cancelar no es un endpoint y no cambia nada.
+
+Fechas desde hoy (zona America/Bogota), no después del evento. Las pruebas de persistencia reales usan SQLite temporal, nunca Supabase: `python manage.py test`.
+
+### Entorno QA local aislado
+
+```powershell
+.\.venv\Scripts\python.exe manage.py migrate --settings=django_crud_api.qa_settings
+.\.venv\Scripts\python.exe manage.py preparar_qa --settings=django_crud_api.qa_settings
+.\.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000 --settings=django_crud_api.qa_settings
+```
+
+Este settings usa exclusivamente `qa.sqlite3` ignorado por Git, datos ficticios y clave local, nunca producción. El comando imprime las cuentas de prueba. `qa-fail-next.flag` provoca un único 503 antes del próximo PATCH/PUT sin escritura; `qa-delay.flag` retrasa consultas 2 segundos. Ambos funcionan solo con qa_settings; retirar el archivo de demora al terminar. No configurar estos settings en Render. Las evidencias locales no certifican automáticamente el despliegue externo.

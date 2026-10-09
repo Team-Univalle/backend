@@ -32,6 +32,7 @@ def profile_stub(
         email=email,
         password_hash=make_password(password),
         is_authenticated=True,
+        daily_limit_hours=6,
     )
 
 
@@ -86,6 +87,7 @@ class AuthenticationTest(SimpleTestCase):
             'id': profile.id,
             'name': profile.name,
             'email': profile.email,
+            'daily_limit_hours': 6,
         })
 
     def test_wrong_password_and_unknown_email_share_the_same_error(self):

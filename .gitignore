@@ -13,6 +13,9 @@ env/
 .env.*
 !.env.example
 db.sqlite3
+qa.sqlite3
+qa.sqlite3-*
+qa-*.flag
 
 # Test and tooling caches
 .pytest_cache/

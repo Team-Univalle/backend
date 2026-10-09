@@ -1,6 +1,8 @@
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from rest_framework import serializers
+from django.utils import timezone
+from decimal import Decimal
 
 from .models import Event, Profile, Subtask
 
@@ -147,6 +149,8 @@ class SubtaskSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
 
         target_date = attrs.get('target_date')
+        if target_date and target_date < timezone.localdate():
+            raise serializers.ValidationError({'target_date': 'La fecha objetivo no puede ser anterior a hoy.'})
 
         # CREACIÓN DE SUBTAREA
         if self.instance is None:
@@ -216,11 +220,23 @@ class DailyLimitSerializer(serializers.Serializer):
     )
 
 class ConflictResponseSerializer(serializers.Serializer):
+    suggested_dates = serializers.ListField(child=serializers.DictField(), required=False)
     conflict = serializers.BooleanField()
     planned_hours = serializers.FloatField()
     daily_limit = serializers.IntegerField()
+    date = serializers.DateField()
+    task_hours = serializers.FloatField()
+    total_hours = serializers.FloatField()
+    excess = serializers.FloatField()
     message = serializers.CharField(required=False)
     options = serializers.ListField(
         child=serializers.CharField(),
         required=False
     )
+
+
+class CapacityQuerySerializer(serializers.Serializer):
+    date = serializers.DateField()
+    subtask_id = serializers.CharField(required=False)
+    estimated_hours = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=Decimal('0.01'), required=False)
+    status = serializers.ChoiceField(choices=['Pendiente', 'Pospuesta', 'Ejecutada'], required=False)
