@@ -172,7 +172,7 @@ Correo inexistente y contraseña incorrecta comparten la respuesta `401`:
 | `GET /events/<id>/subtasks` | `200` | `401`, `404` |
 | `POST /events/<id>/subtasks` | `201` | `400`, `401`, `404` |
 | `GET /subtasks/<id>` | `200` | `401`, `404` |
-| `PATCH /subtasks/<id>` | `200` | `400`, `401`, `404` |
+| `PATCH /subtasks/<id>` | `200` | `400`, `401`, `404`, `409` sobrecarga diaria |
 | `DELETE /subtasks/<id>` | `204` | `401`, `404` |
 | `GET /today` | `200` | `400` estado inválido, `401`, `404` evento ajeno o inexistente |
 
@@ -186,6 +186,23 @@ Authorization: Bearer {{token}}
 ```
 
 `status` solo acepta `Pendiente` o `Pospuesta`.
+
+
+## Estado y notas de una subtarea
+
+La tabla `subtasks` tiene la columna `notes` (texto, opcional). En Supabase se crea una sola vez con `sql/subtasks_notes.sql` (es idempotente); la migración `0003_subtask_notes` solo actualiza el estado de Django porque la tabla es `unmanaged`.
+
+`PATCH /subtasks/<id>` actualiza `status` y/o `notes` sin tocar los demás campos:
+
+```json
+{ "status": "Ejecutada", "notes": "Se pagó el anticipo al proveedor." }
+```
+
+- `status`: `Pendiente`, `Ejecutada` o `Pospuesta`. También se aceptan `PENDING`, `DONE` y `POSTPONED` (sin distinguir mayúsculas), pero siempre se guarda y se devuelve el valor en español.
+- `notes`: texto plano de hasta 500 caracteres, ya sanitizado. Se eliminan etiquetas HTML, caracteres de control e invisibles; se normaliza a Unicode NFC y se recortan espacios y saltos de línea sobrantes. El límite se mide después de sanitizar. Si queda vacío (`""`, `null`, solo espacios o solo etiquetas) se guarda `null`, lo que permite borrar la nota. Un carácter nulo (`\u0000`) o un tipo que no sea texto responde `400`.
+- Cambiar solo `notes` no reevalúa la capacidad diaria; cambiar `status`, `target_date` o `estimated_hours` sí, como antes.
+- Los errores usan el formato global: `{"error": "Revisa los campos marcados.", "fields": {"notes": "..."}}`.
+
 
 ## Formato global de errores
 
