@@ -85,20 +85,8 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = [
-            "id",
-            "user_id",
-            "name",
-            "type",
-            "client",
-            "event_date",
-            "event_time",
-            "location",
-            "deadline",
-            "created_at",
-            "updated_at",
-            "total_subtasks",
-            "completed_subtasks",
-            "progress_percentage",
+            'id', 'user_id', 'name', 'type', 'client', 'event_date',
+            'event_time', 'location', 'deadline', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'user_id', 'created_at', 'updated_at']
         extra_kwargs = {
