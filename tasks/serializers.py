@@ -1,10 +1,14 @@
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from django.utils import timezone
 from decimal import Decimal
 
 from .models import Event, Profile, Subtask
+from .progress import calculate_progress, event_counts
+from .sanitizers import sanitize_text
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -82,6 +86,12 @@ class LoginResponseSerializer(serializers.Serializer):
 
 
 class EventSerializer(serializers.ModelSerializer):
+    # Campos calculados (solo lectura): deben declararse aquí además de listarse en Meta.fields.
+    total_subtasks = serializers.SerializerMethodField()
+    completed_subtasks = serializers.SerializerMethodField()
+    overdue_subtasks = serializers.SerializerMethodField()
+    progress_percentage = serializers.SerializerMethodField()
+
     class Meta:
         model = Event
         fields = [
@@ -98,6 +108,7 @@ class EventSerializer(serializers.ModelSerializer):
             "updated_at",
             "total_subtasks",
             "completed_subtasks",
+            "overdue_subtasks",
             "progress_percentage",
         ]
         read_only_fields = ['id', 'user_id', 'created_at', 'updated_at']
@@ -119,13 +130,43 @@ class EventSerializer(serializers.ModelSerializer):
             }},
         }
 
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_total_subtasks(self, obj):
+        return event_counts(obj)[0]
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_completed_subtasks(self, obj):
+        return event_counts(obj)[1]
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_overdue_subtasks(self, obj):
+        return event_counts(obj)[2]
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_progress_percentage(self, obj):
+        total, completed, _ = event_counts(obj)
+        return calculate_progress(total, completed)
+
 
 class SubtaskSerializer(serializers.ModelSerializer):
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        trim_whitespace=False,
+        # Tope bruto para no procesar cargas enormes; el límite real se valida ya sanitizado.
+        max_length=Subtask.NOTES_MAX_LENGTH * 10,
+        error_messages={
+            'invalid': 'Las notas deben ser texto.',
+            'max_length': f'Las notas no pueden superar los {Subtask.NOTES_MAX_LENGTH} caracteres.',
+        },
+    )
+
     class Meta:
         model = Subtask
         fields = [
             'id', 'event_id', 'name', 'target_date', 'estimated_hours',
-            'status', 'created_at', 'updated_at',
+            'status', 'notes', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'event_id', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -150,6 +191,14 @@ class SubtaskSerializer(serializers.ModelSerializer):
                 'invalid_choice': 'El estado debe ser Pendiente, Ejecutada o Pospuesta.',
             }},
         }
+
+    def validate_notes(self, value):
+        notes = sanitize_text(value) if value is not None else None
+        if notes is not None and len(notes) > Subtask.NOTES_MAX_LENGTH:
+            raise serializers.ValidationError(
+                f'Las notas no pueden superar los {Subtask.NOTES_MAX_LENGTH} caracteres.'
+            )
+        return notes
 
     def validate_estimated_hours(self, value):
         if value <= 0:

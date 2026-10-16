@@ -56,6 +56,7 @@ class Subtask(models.Model):
     """Subtarea logística de un evento (tabla subtasks de Supabase)."""
 
     ESTADOS = [('Pendiente', 'Pendiente'), ('Ejecutada', 'Ejecutada'), ('Pospuesta', 'Pospuesta')]
+    NOTES_MAX_LENGTH = 500
 
     id = models.CharField(primary_key=True, max_length=50, default=generar_id)
     event = models.ForeignKey(Event, on_delete=models.CASCADE, db_column='event_id', related_name='subtasks')
@@ -63,6 +64,8 @@ class Subtask(models.Model):
     target_date = models.DateField()
     estimated_hours = models.DecimalField(max_digits=5, decimal_places=2)
     status = models.CharField(max_length=20, choices=ESTADOS, default='Pendiente')
+    # Nota de ejecución (HU-09), ya sanitizada. La columna se crea con sql/subtasks_notes.sql.
+    notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)
 
