@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from .authentication import create_access_token
 from .exceptions import InvalidCredentials, OverloadConflict
 from .capacity import evaluate_capacity
+from .progress import annotate_progress
 from .models import Event, Profile, Subtask, generar_id
 from .serializers import (
     EventSerializer,
@@ -106,7 +107,8 @@ class EventListCreateView(generics.ListCreateAPIView):
     serializer_class = EventSerializer
 
     def get_queryset(self):
-        return Event.objects.filter(user_id=usuario_actual_id(self.request)).order_by('event_date')
+        queryset = Event.objects.filter(user_id=usuario_actual_id(self.request))
+        return annotate_progress(queryset).order_by('event_date')
 
     def perform_create(self, serializer):
         serializer.save(user_id=usuario_actual_id(self.request))
@@ -119,7 +121,7 @@ class EventDetailView(generics.RetrieveUpdateDestroyAPIView):
     http_method_names = ['get', 'patch', 'delete']
 
     def get_queryset(self):
-        return Event.objects.filter(user_id=usuario_actual_id(self.request))
+        return annotate_progress(Event.objects.filter(user_id=usuario_actual_id(self.request)))
 
 
 class SubtaskListCreateView(generics.ListCreateAPIView):
