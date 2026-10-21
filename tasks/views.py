@@ -4,13 +4,14 @@ from django.utils import timezone
 from django.db.models import Sum
 from django.db import transaction
 from datetime import timedelta
-from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, extend_schema_view
 from rest_framework import generics
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import api_docs
 from .authentication import create_access_token
 from .exceptions import InvalidCredentials, OverloadConflict
 from .capacity import evaluate_capacity
@@ -46,6 +47,7 @@ class LoginView(APIView):
         responses={200: LoginResponseSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer},
         auth=[],
         summary='Iniciar sesión',
+        examples=api_docs.LOGIN,
     )
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -73,6 +75,7 @@ class RegisterView(APIView):
         responses={201: LoginResponseSerializer, 400: GlobalErrorSerializer},
         auth=[],
         summary='Registrar nuevo usuario',
+        examples=api_docs.REGISTER,
     )
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -96,11 +99,17 @@ class RegisterView(APIView):
 
 
 class MeView(APIView):
-    @extend_schema(responses={200: ProfileSerializer, 401: GlobalErrorSerializer}, summary='Usuario actual')
+    @extend_schema(responses={200: ProfileSerializer, 401: GlobalErrorSerializer}, summary='Usuario actual', examples=api_docs.ME)
     def get(self, request):
         return Response(ProfileSerializer(request.user).data)
 
 
+@extend_schema_view(
+    get=extend_schema(summary='Listar eventos con su progreso', examples=api_docs.EVENTOS_LISTA,
+                      responses={200: EventSerializer(many=True), 401: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+    post=extend_schema(summary='Crear evento', examples=api_docs.EVENTOS_CREAR,
+                       responses={201: EventSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+)
 class EventListCreateView(generics.ListCreateAPIView):
     """GET /events -> lista los eventos del usuario. POST /events -> crea un evento."""
 
@@ -114,6 +123,14 @@ class EventListCreateView(generics.ListCreateAPIView):
         serializer.save(user_id=usuario_actual_id(self.request))
 
 
+@extend_schema_view(
+    get=extend_schema(summary='Ver evento', examples=api_docs.EVENTO_DETALLE,
+                      responses={200: EventSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+    patch=extend_schema(summary='Editar evento', examples=api_docs.EVENTO_EDITAR,
+                        responses={200: EventSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+    delete=extend_schema(summary='Eliminar evento (y sus gestiones)', examples=api_docs.EVENTO_ELIMINAR,
+                         responses={204: None, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+)
 class EventDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET, PATCH y DELETE /events/<id>. Al eliminar un evento se eliminan sus subtareas (cascada)."""
 
@@ -124,6 +141,12 @@ class EventDetailView(generics.RetrieveUpdateDestroyAPIView):
         return annotate_progress(Event.objects.filter(user_id=usuario_actual_id(self.request)))
 
 
+@extend_schema_view(
+    get=extend_schema(summary='Listar gestiones de un evento', examples=api_docs.GESTIONES_LISTA,
+                      responses={200: SubtaskSerializer(many=True), 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+    post=extend_schema(summary='Crear gestión', examples=api_docs.GESTIONES_CREAR,
+                       responses={201: SubtaskSerializer, 409: GlobalErrorSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+)
 class SubtaskListCreateView(generics.ListCreateAPIView):
     """GET /events/<id>/subtasks -> subtareas del evento. POST -> crea una subtarea en ese evento."""
 
@@ -160,6 +183,14 @@ class SubtaskListCreateView(generics.ListCreateAPIView):
             serializer.save(event=self.event, status='Pendiente')
 
 
+@extend_schema_view(
+    get=extend_schema(summary='Ver gestión', examples=api_docs.GESTION_DETALLE,
+                      responses={200: SubtaskSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+    patch=extend_schema(summary='Editar, reprogramar, ejecutar o posponer gestión', examples=api_docs.GESTION_EDITAR,
+                        responses={200: SubtaskSerializer, 409: GlobalErrorSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+    delete=extend_schema(summary='Eliminar gestión', examples=api_docs.GESTION_ELIMINAR,
+                         responses={204: None, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer, 500: GlobalErrorSerializer}),
+)
 class SubtaskDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET, PATCH y DELETE /subtasks/<id> (solo subtareas de eventos del usuario)."""
 
@@ -227,6 +258,7 @@ class TodayListNoExecute(APIView):
             400: TodayValidationErrorSerializer,
             404: GlobalErrorSerializer,
         },
+        examples=api_docs.HOY,
     )
     def get(self, request):
         today = timezone.localdate()
@@ -274,7 +306,8 @@ class DailyLimitView(APIView):
 
     @extend_schema(
         summary='Consultar límite diario',
-        responses={200: DailyLimitSerializer}
+        responses={200: DailyLimitSerializer, 401: GlobalErrorSerializer},
+        examples=api_docs.LIMITE_CONSULTAR,
     )
     def get(self, request):
 
@@ -285,7 +318,8 @@ class DailyLimitView(APIView):
     @extend_schema(
         summary='Actualizar límite diario',
         request=DailyLimitSerializer,
-        responses={200: DailyLimitSerializer}
+        responses={200: DailyLimitSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer},
+        examples=api_docs.LIMITE_ACTUALIZAR,
     )
     def patch(self, request):
 
@@ -302,7 +336,7 @@ class DailyLimitView(APIView):
             'daily_limit_hours': request.user.daily_limit_hours
         })
 
-    @extend_schema(request=DailyLimitSerializer, responses={200: DailyLimitSerializer, 400: GlobalErrorSerializer})
+    @extend_schema(request=DailyLimitSerializer, responses={200: DailyLimitSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer}, summary='Actualizar límite diario (PUT)', examples=api_docs.LIMITE_ACTUALIZAR)
     def put(self, request):
         return self.patch(request)
 
@@ -338,6 +372,8 @@ class ConflictCheckView(APIView):
             OpenApiParameter(name='status', enum=['Pendiente', 'Pospuesta', 'Ejecutada']),
         ],
         responses={200: ConflictResponseSerializer, 400: GlobalErrorSerializer, 401: GlobalErrorSerializer, 404: GlobalErrorSerializer},
+        summary='Comprobar sobrecarga de un día',
+        examples=api_docs.CONFLICTOS,
     )
     
     def get(self, request):

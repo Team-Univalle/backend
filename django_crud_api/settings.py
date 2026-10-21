@@ -10,12 +10,14 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import hashlib
 import os
 import sys
 from pathlib import Path
 
 import dj_database_url
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -28,17 +30,48 @@ load_dotenv(BASE_DIR / '.env')
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-r%gkimx-ua1fzfo)(3rz80(v7(goxwfz6uw$e#8q1_*ux#slk9'
+def env_list(name, default=()):
+    """Lista separada por comas desde el entorno, sin espacios ni barras finales."""
+    raw = os.getenv(name, '')
+    values = [item.strip().rstrip('/') for item in raw.split(',') if item.strip()]
+    return values or list(default)
+
+
+TESTING = 'test' in sys.argv
+
+# Producción = Render (Render define RENDER=true en todos sus servicios) o DJANGO_ENV=production.
+# Los ajustes de HTTPS y la lista estricta de CORS solo aplican en producción, para no romper el desarrollo local.
+IS_PRODUCTION = (
+    os.getenv('RENDER', '').strip().lower() == 'true'
+    or os.getenv('DJANGO_ENV', '').strip().lower() == 'production'
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Apagado por defecto (Render). En local se puede activar con DEBUG=True en el entorno.
+# Con DEBUG=True Django muestra páginas HTML de depuración y no usa handler404/handler500.
+DEBUG = os.getenv('DEBUG', 'False').strip().lower() in ('1', 'true', 'yes')
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    ".onrender.com",
-]
+# SECURITY WARNING: keep the secret key used in production secret!
+# Se lee de SECRET_KEY. Si falta, se deriva de JWT_SECRET (que ya existe en Render) para no tumbar
+# el despliegue; lo correcto es definir SECRET_KEY propia. Nunca hay una clave secreta escrita aquí.
+SECRET_KEY = os.getenv('SECRET_KEY', '').strip()
+if not SECRET_KEY:
+    _jwt_secret = os.getenv('JWT_SECRET', '').strip()
+    if _jwt_secret:
+        SECRET_KEY = hashlib.sha256(f'django-secret-key:{_jwt_secret}'.encode()).hexdigest()
+    elif DEBUG or TESTING or not IS_PRODUCTION:
+        SECRET_KEY = 'solo-desarrollo-local-no-usar-en-produccion-' + 'x' * 20
+    else:
+        raise ImproperlyConfigured('Configura SECRET_KEY en las variables de entorno de producción.')
+
+# Hosts: ALLOWED_HOSTS del entorno + el dominio que Render asigna al servicio (RENDER_EXTERNAL_HOSTNAME).
+# Sin variable, se mantiene el comportamiento anterior (.onrender.com) para no romper el despliegue.
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', default=['.onrender.com'] if IS_PRODUCTION else [])
+if os.getenv('RENDER_EXTERNAL_HOSTNAME'):
+    ALLOWED_HOSTS.append(os.getenv('RENDER_EXTERNAL_HOSTNAME').strip())
+if not IS_PRODUCTION:
+    ALLOWED_HOSTS += ['localhost', '127.0.0.1', '[::1]']
+ALLOWED_HOSTS = list(dict.fromkeys(ALLOWED_HOSTS))
 
 
 # Application definition
@@ -91,9 +124,18 @@ WSGI_APPLICATION = 'django_crud_api.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 # Base de datos en Supabase (PostgreSQL), leída de la variable DATABASE_URL
+# Con el pooler de transacciones de Supabase (puerto 6543) no se reutilizan conexiones ni se usan
+# sentencias preparadas; con el de sesión (5432) se mantiene la configuración anterior.
+_database_url = os.getenv('DATABASE_URL', '')
+_transaction_pooler = ':6543/' in _database_url
 DATABASES = {
-    'default': dj_database_url.config(conn_max_age=600)
+    'default': dj_database_url.config(
+        conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', '0' if _transaction_pooler else '600')),
+        conn_health_checks=True,
+    )
 }
+if _transaction_pooler:
+    DATABASES['default'].setdefault('OPTIONS', {})['prepare_threshold'] = None
 
 
 # Password validation
@@ -143,15 +185,24 @@ MAILERS = {
 }
 
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://frontend-vert-one-pt320cfqws.vercel.app",
-]
+# CORS: solo los orígenes exactos del frontend (https, sin barra final), desde CORS_ALLOWED_ORIGINS.
+# Sin variable se usa el frontend de producción actual, para no bloquear la app si falta la variable.
+# FRONTEND_URL se mantiene por compatibilidad con la configuración anterior de Render.
+FRONTEND_PRODUCCION = 'https://frontend-vert-one-pt320cfqws.vercel.app'
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS', default=[FRONTEND_PRODUCCION])
+if os.getenv('FRONTEND_URL', '').strip():
+    CORS_ALLOWED_ORIGINS.append(os.getenv('FRONTEND_URL').strip().rstrip('/'))
+if not IS_PRODUCTION:
+    # Localhost solo en desarrollo (Vite en el puerto 5173).
+    CORS_ALLOWED_ORIGINS += ['http://localhost:5173', 'http://127.0.0.1:5173']
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS))
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = False  # la API usa token Bearer, no cookies
 
-if frontend_url := os.getenv('FRONTEND_URL'):
-    if frontend_url not in CORS_ALLOWED_ORIGINS:
-        CORS_ALLOWED_ORIGINS.append(frontend_url)
+# Formularios con cookie (solo /admin) desde estos orígenes https.
+CSRF_TRUSTED_ORIGINS = env_list(
+    'CSRF_TRUSTED_ORIGINS', default=[origin for origin in CORS_ALLOWED_ORIGINS if origin.startswith('https://')]
+)
 
 # django-cors-headers ya incluye Authorization; se declara para dejar explícito
 # el contrato que necesita el frontend desplegado en Vercel.
@@ -180,16 +231,31 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': (
         'Backend del MiniProyecto 1 - Universidad del Valle.\n\n'
         '**Autenticación:** usa `Authorization: Bearer <token>`. El token se obtiene en `POST /login`.\n\n'
-        '**Formato de errores:**\n'
-        '- 400: `{"error": "Revisa los campos marcados.", "fields": {"campo": "mensaje"}}`\n'
-        '- 401: `{"error": "Tu sesión expiró o no has iniciado sesión."}`\n'
-        '- 404: `{"error": "No encontramos lo que buscas."}`\n'
-        '- 500: `{"error": "Ocurrió un error en el servidor. Intenta de nuevo."}`\n\n'
+        '**Formato de errores** (siempre las mismas cuatro llaves; detalle en docs/errores-api.md):\n'
+        '`{"status": 400, "code": "validation_error", "error": "Revisa los campos marcados.", "fields": {"campo": "mensaje"}}`\n'
+        '- 400 `validation_error` / `parse_error` · 401 `not_authenticated` / `invalid_credentials` · '
+        '403 `forbidden` · 404 `not_found` · 405 `method_not_allowed` · 409 `overload_conflict` (agrega `conflict`) · '
+        '415 `unsupported_media_type` · 500 `server_error`.\n'
+        '- Muestra `error` tal cual y cada mensaje de `fields` junto a su input.\n\n'
         '**Fechas:** formato AAAA-MM-DD.'
     ),
 }
 
+# HTTPS en producción. Render termina el TLS y avisa con X-Forwarded-Proto.
+if IS_PRODUCTION:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = True
+    # /health y / quedan fuera de la redirección para que el chequeo de salud de Render no reciba un 301.
+    SECURE_REDIRECT_EXEMPT = [r'^health$', r'^$']
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '86400'))  # 1 día; subir cuando todo esté estable
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    # El dominio es un subdominio de onrender.com (no es nuestro): no aplica HSTS a subdominios ni preload.
+    SILENCED_SYSTEM_CHECKS = ['security.W005', 'security.W021']
+
 # Tests con persistencia real local, no sobre los datos del equipo en Supabase.
-if 'test' in sys.argv:
+if TESTING:
     DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
     TEST_RUNNER = 'tasks.test_runner.LocalDatabaseRunner'
