@@ -266,18 +266,32 @@ class TodayErrorFieldsSerializer(serializers.Serializer):
     status = serializers.CharField()
 
 
-class TodayValidationErrorSerializer(serializers.Serializer):
-    error = serializers.CharField()
+class GlobalErrorSerializer(serializers.Serializer):
+    """Formato único de error (solo documentación). Ver docs/errores-api.md."""
+    status = serializers.IntegerField(help_text='Igual al código HTTP.')
+    code = serializers.CharField(help_text='Identificador estable, p. ej. validation_error o not_found.')
+    error = serializers.CharField(help_text='Mensaje en español para mostrar tal cual.')
+    fields = serializers.DictField(child=serializers.CharField(), help_text='Un mensaje por campo; {} si no aplica.')
+
+
+class TodayValidationErrorSerializer(GlobalErrorSerializer):
     fields = TodayErrorFieldsSerializer()
 
+LIMITE_RANGO = 'El límite debe estar entre 1 y 16 horas por día'  # mismo texto que el frontend (utils/limite.js)
 
-class GlobalErrorSerializer(serializers.Serializer):
-    error = serializers.CharField()
 
 class DailyLimitSerializer(serializers.Serializer):
     daily_limit_hours = serializers.IntegerField(
         min_value=1,
-        max_value=16
+        max_value=16,
+        error_messages={
+            'required': LIMITE_RANGO,
+            'null': LIMITE_RANGO,
+            'min_value': LIMITE_RANGO,
+            'max_value': LIMITE_RANGO,
+            'invalid': 'El límite debe ser un número entero de horas',
+            'max_string_length': LIMITE_RANGO,
+        },
     )
 
 class ConflictResponseSerializer(serializers.Serializer):
@@ -297,7 +311,11 @@ class ConflictResponseSerializer(serializers.Serializer):
 
 
 class CapacityQuerySerializer(serializers.Serializer):
-    date = serializers.DateField()
+    date = serializers.DateField(error_messages={
+        'required': 'Selecciona una fecha.',
+        'null': 'Selecciona una fecha.',
+        'invalid': 'La fecha no es válida. Usa el formato AAAA-MM-DD.',
+    })
     subtask_id = serializers.CharField(required=False)
     estimated_hours = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=Decimal('0.01'), required=False)
     status = serializers.ChoiceField(choices=['Pendiente', 'Pospuesta', 'Ejecutada'], required=False)

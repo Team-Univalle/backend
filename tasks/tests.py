@@ -19,6 +19,7 @@ from .views import EventDetailView, EventListCreateView, SubtaskDetailView
 
 
 TEST_JWT_SECRET = 'test-secret-that-is-not-used-outside-the-test-suite'
+NOT_FOUND_BODY = {'status': 404, 'code': 'not_found', 'error': 'No encontramos lo que buscas.', 'fields': {}}
 
 
 def profile_stub(
@@ -95,7 +96,9 @@ class AuthenticationTest(SimpleTestCase):
         missing_profile = self.login(None, email='missing@example.com')
         self.assertEqual(wrong_password.status_code, 401)
         self.assertEqual(missing_profile.status_code, 401)
-        self.assertEqual(wrong_password.json(), {'error': 'Credenciales inválidas'})
+        self.assertEqual(wrong_password.json(), {
+            'status': 401, 'code': 'invalid_credentials', 'error': 'Correo o contraseña incorrectos.', 'fields': {},
+        })
         self.assertEqual(missing_profile.json(), wrong_password.json())
 
     def test_empty_login_fields_use_global_validation_format(self):
@@ -106,6 +109,8 @@ class AuthenticationTest(SimpleTestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {
+            'status': 400,
+            'code': 'validation_error',
             'error': 'Revisa los campos marcados.',
             'fields': {
                 'email': 'El correo es obligatorio.',
@@ -125,7 +130,10 @@ class AuthenticationTest(SimpleTestCase):
         response = self.client.get('/me')
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {
+            'status': 401,
+            'code': 'not_authenticated',
             'error': 'Tu sesión expiró o no has iniciado sesión.',
+            'fields': {},
         })
 
     def test_expired_token_returns_global_401(self):
@@ -138,7 +146,10 @@ class AuthenticationTest(SimpleTestCase):
         response = self.client.get('/me', HTTP_AUTHORIZATION=f'Bearer {token}')
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {
+            'status': 401,
+            'code': 'not_authenticated',
             'error': 'Tu sesión expiró o no has iniciado sesión.',
+            'fields': {},
         })
 
     def test_tampered_token_returns_global_401(self):
@@ -146,7 +157,10 @@ class AuthenticationTest(SimpleTestCase):
         response = self.client.get('/me', HTTP_AUTHORIZATION=f'Bearer {token}')
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {
+            'status': 401,
+            'code': 'not_authenticated',
             'error': 'Tu sesión expiró o no has iniciado sesión.',
+            'fields': {},
         })
 
 
@@ -308,7 +322,7 @@ class TodayEndpointTest(SimpleTestCase):
             queryset, '?event_id=foreign-event', event_error=Http404
         )
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json(), {'error': 'No encontramos lo que buscas.'})
+        self.assertEqual(response.json(), NOT_FOUND_BODY)
         event_lookup.assert_called_once_with(Event, pk='foreign-event', user_id=self.user.id)
         initial_filter.assert_not_called()
 
@@ -319,6 +333,8 @@ class TodayEndpointTest(SimpleTestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {
+            'status': 400,
+            'code': 'validation_error',
             'error': 'Revisa los campos marcados.',
             'fields': {'status': 'El estado debe ser Pendiente o Pospuesta.'},
         })
@@ -391,5 +407,151 @@ class UserIsolationTest(SimpleTestCase):
 
         self.assertEqual(event_response.status_code, 404)
         self.assertEqual(subtask_response.status_code, 404)
-        self.assertEqual(event_response.json(), {'error': 'No encontramos lo que buscas.'})
-        self.assertEqual(subtask_response.json(), {'error': 'No encontramos lo que buscas.'})
+        self.assertEqual(event_response.json(), NOT_FOUND_BODY)
+        self.assertEqual(subtask_response.json(), NOT_FOUND_BODY)
+
+
+class ErrorFormatTest(SimpleTestCase):
+    """HU-11 [BE]: todo error responde {status, code, error, fields} con mensajes sin jerga."""
+
+    KEYS = {'status', 'code', 'error', 'fields'}
+
+    def assert_format(self, body, status_code, code, error=None, fields=None):
+        self.assertEqual(set(body), self.KEYS)
+        self.assertEqual(body['status'], status_code)
+        self.assertEqual(body['code'], code)
+        self.assertIsInstance(body['error'], str)
+        self.assertTrue(body['error'])
+        self.assertIsInstance(body['fields'], dict)
+        if error is not None:
+            self.assertEqual(body['error'], error)
+        if fields is not None:
+            self.assertEqual(body['fields'], fields)
+
+    def call_handler(self, exc):
+        from .exceptions import manejar_errores
+        response = manejar_errores(exc, {'view': None, 'request': None})
+        self.assertEqual(response.data['status'], response.status_code)
+        return response
+
+    def test_400_validacion_con_fields(self):
+        response = self.client.post('/login', data=json.dumps({'email': '', 'password': ''}), content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assert_format(response.json(), 400, 'validation_error', 'Revisa los campos marcados.', {
+            'email': 'El correo es obligatorio.',
+            'password': 'La contraseña es obligatoria.',
+        })
+
+    def test_400_json_malformado(self):
+        response = self.client.post('/login', data='{"email": "x",', content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assert_format(response.json(), 400, 'parse_error', 'No pudimos leer los datos enviados.', {})
+
+    def test_400_lista_en_vez_de_objeto(self):
+        response = self.client.post('/login', data='[1, 2]', content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assert_format(response.json(), 400, 'parse_error', 'No pudimos leer los datos enviados.', {})
+
+    def test_400_errores_anidados_y_no_de_campo(self):
+        from rest_framework.exceptions import ValidationError
+        body = self.call_handler(ValidationError({'a': {'b': ['Mensaje B']}, 'c': ['Mensaje C', 'otro']})).data
+        self.assert_format(body, 400, 'validation_error', 'Revisa los campos marcados.', {'a.b': 'Mensaje B', 'c': 'Mensaje C'})
+        body = self.call_handler(ValidationError({'non_field_errors': ['La fecha final es anterior.']})).data
+        self.assert_format(body, 400, 'validation_error', 'La fecha final es anterior.', {})
+
+    def test_400_validation_error_con_texto_no_rompe_el_manejador(self):
+        from rest_framework.exceptions import ValidationError
+        for exc in (ValidationError('Texto suelto.'), ValidationError(['En lista.'])):
+            self.assert_format(self.call_handler(exc).data, 400, 'validation_error')
+
+    def test_401_sin_sesion(self):
+        from rest_framework.exceptions import NotAuthenticated
+        response = self.call_handler(NotAuthenticated())
+        self.assertEqual(response.status_code, 401)
+        self.assert_format(response.data, 401, 'not_authenticated', 'Tu sesión expiró o no has iniciado sesión.', {})
+        real = self.client.get('/me')
+        self.assertEqual(real.status_code, 401)
+        self.assert_format(real.json(), 401, 'not_authenticated')
+
+    def test_403_sin_permiso(self):
+        from rest_framework.exceptions import PermissionDenied
+        response = self.call_handler(PermissionDenied())
+        self.assertEqual(response.status_code, 403)
+        self.assert_format(response.data, 403, 'forbidden', 'No tienes permiso para hacer esto.', {})
+
+    def test_404_recurso_y_url_inexistente(self):
+        from rest_framework.exceptions import NotFound
+        self.assert_format(self.call_handler(NotFound()).data, 404, 'not_found', 'No encontramos lo que buscas.', {})
+        # Los tests corren con DEBUG=False, así que aquí responde handler404 (JSON, no HTML).
+        response = self.client.get('/esta-ruta-no-existe')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response['Content-Type'], 'application/json')
+        self.assert_format(response.json(), 404, 'not_found', 'No encontramos lo que buscas.', {})
+
+    def test_405_metodo_no_disponible(self):
+        response = self.client.put('/login', data='{}', content_type='application/json')
+        self.assertEqual(response.status_code, 405)
+        self.assert_format(response.json(), 405, 'method_not_allowed', 'Esta acción no está disponible.', {})
+
+    def test_415_formato_no_soportado(self):
+        response = self.client.post('/login', data='hola', content_type='text/plain')
+        self.assertEqual(response.status_code, 415)
+        self.assert_format(response.json(), 415, 'unsupported_media_type', 'Envía los datos en formato JSON.', {})
+
+    def test_409_sobrecarga_conserva_conflict(self):
+        from .exceptions import OverloadConflict
+        capacity = {'message': 'Quedarías con 7h de gestión planificadas (límite 6h)', 'conflict': True, 'excess': 1.0}
+        body = self.call_handler(OverloadConflict(capacity)).data
+        self.assertEqual(set(body), self.KEYS | {'conflict'})
+        self.assertEqual((body['status'], body['code'], body['fields']), (409, 'overload_conflict', {}))
+        self.assertEqual(body['conflict'], capacity)
+
+    def test_500_no_filtra_el_detalle(self):
+        secreto = 'psycopg: password=SECRETO host=db.interna'
+        with self.assertLogs('tasks.exceptions', level='ERROR') as logs:
+            response = self.call_handler(RuntimeError(secreto))
+        self.assertEqual(response.status_code, 500)
+        self.assert_format(response.data, 500, 'server_error', 'Ocurrió un error en el servidor. Intenta de nuevo.', {})
+        self.assertNotIn('SECRETO', json.dumps(response.data))
+        self.assertIn('SECRETO', '\n'.join(logs.output))  # el detalle queda en el log
+
+    def test_500_real_en_una_vista(self):
+        with patch('tasks.views.LoginView.post', side_effect=RuntimeError('detalle interno SECRETO')), \
+                self.assertLogs('tasks.exceptions', level='ERROR'):
+            response = self.client.post('/login', data='{}', content_type='application/json')
+        self.assertEqual(response.status_code, 500)
+        self.assert_format(response.json(), 500, 'server_error')
+        self.assertNotIn('SECRETO', response.content.decode())
+
+    def test_handler500_de_django(self):
+        from .exceptions import handler500
+        response = handler500(None)
+        self.assertEqual(response.status_code, 500)
+        self.assert_format(json.loads(response.content), 500, 'server_error')
+
+
+class ClearValidationMessagesTest(SimpleTestCase):
+    """HU-11: mensajes de validación claros y sin jerga."""
+
+    def test_limite_diario_fuera_de_rango_o_no_entero(self):
+        from .serializers import DailyLimitSerializer
+        for value in (0, 17, 99, None):
+            serializer = DailyLimitSerializer(data={'daily_limit_hours': value})
+            self.assertFalse(serializer.is_valid())
+            self.assertEqual(serializer.errors['daily_limit_hours'][0], 'El límite debe estar entre 1 y 16 horas por día')
+        for value in ('7.5', 'abc'):
+            serializer = DailyLimitSerializer(data={'daily_limit_hours': value})
+            self.assertFalse(serializer.is_valid())
+            self.assertEqual(serializer.errors['daily_limit_hours'][0], 'El límite debe ser un número entero de horas')
+        serializer = DailyLimitSerializer(data={})
+        self.assertFalse(serializer.is_valid())
+        self.assertEqual(serializer.errors['daily_limit_hours'][0], 'El límite debe estar entre 1 y 16 horas por día')
+
+    def test_conflicts_sin_fecha_o_con_fecha_invalida(self):
+        from .serializers import CapacityQuerySerializer
+        serializer = CapacityQuerySerializer(data={})
+        self.assertFalse(serializer.is_valid())
+        self.assertEqual(serializer.errors['date'][0], 'Selecciona una fecha.')
+        serializer = CapacityQuerySerializer(data={'date': '2026-02-30'})
+        self.assertFalse(serializer.is_valid())
+        self.assertEqual(serializer.errors['date'][0], 'La fecha no es válida. Usa el formato AAAA-MM-DD.')

@@ -249,3 +249,7 @@ Fechas desde hoy (zona America/Bogota), no después del evento. Las pruebas de p
 ```
 
 Este settings usa exclusivamente `qa.sqlite3` ignorado por Git, datos ficticios y clave local, nunca producción. El comando imprime las cuentas de prueba. `qa-fail-next.flag` provoca un único 503 antes del próximo PATCH/PUT sin escritura; `qa-delay.flag` retrasa consultas 2 segundos. Ambos funcionan solo con qa_settings; retirar el archivo de demora al terminar. No configurar estos settings en Render. Las evidencias locales no certifican automáticamente el despliegue externo.
+
+## Despliegue
+
+Variables de entorno, comandos de Render, usuario demo (`python manage.py seed_demo`) y URLs públicas: ver [docs/despliegue.md](docs/despliegue.md). Formato de errores: [docs/errores-api.md](docs/errores-api.md). Swagger: `/api/docs/`.
